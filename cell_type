@@ -27,7 +27,6 @@ print(head(raw_blob))
 
 meta <- tibble(
   sample = pd$geo_accession,
-  title  = as.character(pd$title),
   raw    = raw_blob
 ) %>%
   mutate(
@@ -38,16 +37,17 @@ meta <- tibble(
       grepl("disease: Endometriosis",    raw) ~ "Endometriosis",
       grepl("disease: No Endometriosis", raw) ~ "Control",
       TRUE ~ NA_character_
-    )
-  )
-cell_type = case_when(
-  grepl("cell type:Endometrial Mesenchymal Stem Cell", raw) ~ "eMSC",
-  grepl("cell type: Endometrial Stromal Fibroblast", raw) ~ "eSF",
-  TRUE ~ NA_character_
-)
+    ),
+      
+    
+    cell_type = case_when(
+      grepl("Endometrial Mesenchymal Stem Cell", raw) ~ "EMS",
+      grepl("Endometrial Stromal Fibroblast", raw) ~ "ESF",
+      TRUE ~ NA_character_
+    ))
 
 print(table(meta$cell_type, useNA = "ifany"))
-print(summary(meta$age))
+
 
 
 
@@ -66,35 +66,32 @@ library(dplyr); library(ggplot2)
 stopifnot(all(c("age", "group", "cell_type") %in% colnames(meta)), nrow(meta) > 0)
 print(range(meta$age, na.rm = TRUE))   # set your breaks from THIS
 
-breaks <- c(20, 25, 30, 35, 40, 45, 50)
-labs_  <- c("20-24", "25-29", "30-34", "35-39", "40-44", "45-49")
 
 meta2 <- meta %>%
   dplyr::mutate(
-    age_group = cut(age, breaks = breaks, right = FALSE, labels = labs_),
-    group     = factor(group, levels = c("Control", "Endometriosis"))
+    cell_type = cut(cell_type, breaks = breaks, right = FALSE, labels = labs_),
+    group     = factor(group, levels = c("EMS", "EFS"))
   ) %>%
-  dplyr::filter(!is.na(age_group), !is.na(group))
-
-stopifnot("age_group" %in% colnames(meta2, nrow(meta0) > 0))
+  
 
 counts <- meta2 %>%
-  dplyr::count(age_group, group, .drop = FALSE)
+  dplyr::count(cell_type, group, .drop = FALSE)
 
-stopifnot("age_group" %in% colnames(counts))   # fails HERE if count() is masked
+stopifnot("cell_type" %in% colnames(counts))   # fails HERE if count() is masked
 print(counts)
 #bar graph comparing sample
-p <- ggplot(counts, aes(x = age_group, y = n, fill = group)) +
+p <- ggplot(counts, aes(x = cell_type, y = n, fill = group)) +
   geom_col(position = position_dodge(width = 0.8), width = 0.7, colour = "black") +
   geom_text(aes(label = ifelse(n > 0, n, "")),
             position = position_dodge(width = 0.8), vjust = -0.4, size = 3.5) +
   scale_fill_manual(values = c(Control = "#8FBFD8", Endometriosis = "#D98F8F")) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
-  labs(title = "GSE73622: sample distribution by age group",
+  labs(title = "GSE73622: cell type distribution by age group",
        subtitle = "Female control vs. female endometriosis",
+       caption = " EMS = Endometrial Mesenchymal Stem Cell,
+       ESF = Endometrial Stromal Fibroblast",
        x = "Age group (years)", y = "Number of samples", fill = NULL) +
   theme_classic(base_size = 13) +
-  theme_sub_legend()
 theme(legend.position = "top")
 
 print(p)
