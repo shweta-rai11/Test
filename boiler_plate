@@ -1,6 +1,4 @@
-# GSE73622 — sample counts by age bracket, female control vs. female endometriosis
-# NOTE: every subject in this series is female, so "female" is the whole cohort,
-# not a filter. There is no sex column to subset on.
+
 
 library(GEOquery)
 library(dplyr)
@@ -15,30 +13,38 @@ pd   <- pData(eset)
 # ---- 2. INSPECT BEFORE TRUSTING THE PARSING -------------------------------
 # Read this output and fix the regexes in step 3 if the labels differ.
 print(colnames(pd))
-pd %>% select(title, geo_accession, starts_with("characteristics")) %>% head(20) %>% print()
+pd %>% select(title, geo_accession, starts_with("characteristics_ch1")) %>% head(20) %>% print()
 
 # ---- 3. Parse group + age -------------------------------------------------
 char_cols <- grep("^characteristics", colnames(pd), value = TRUE)
-blob <- apply(pd[, char_cols, drop = FALSE], 1, paste, collapse = " | ")
+raw_blob  <- apply(pd[, char_cols, drop = FALSE], 1, paste, collapse = " | ")
+
+# rename
+# "cell type:ch1" <- "cell_type"
+
+# LOOK at this first — confirm age is actually in there and see its format
+print(head(raw_blob))
 
 meta <- tibble(
   sample = pd$geo_accession,
   title  = as.character(pd$title),
-  raw    = blob
+  raw    = raw_blob
 ) %>%
   mutate(
     age = suppressWarnings(as.numeric(
       str_match(raw, "(?i)age[^0-9]*([0-9]+\\.?[0-9]*)")[, 2]
     )),
     group = case_when(
-      grepl("(?i)endometriosis|\\beSF\\b|stage\\s*(I|IV|1|4)", raw) ~ "Endometriosis",
-      grepl("(?i)no uterine pathology|\\bNUP\\b|control|normal|healthy", raw) ~ "Control",
+      grepl("disease: Endometriosis",    raw) ~ "Endometriosis",
+      grepl("disease: No Endometriosis", raw) ~ "Control",
       TRUE ~ NA_character_
     )
   )
 
-print(summary(meta$age))          # all NA => age isn't in the metadata; see note below
 print(table(meta$group, useNA = "ifany"))
+print(summary(meta$age))
+
+
 
 meta <- meta %>% filter(!is.na(age), !is.na(group))
 stopifnot(nrow(meta) > 0)
@@ -81,6 +87,7 @@ p <- ggplot(counts, aes(x = age_group, y = n, fill = group)) +
        subtitle = "Female control vs. female endometriosis",
        x = "Age group (years)", y = "Number of samples", fill = NULL) +
   theme_classic(base_size = 13) +
+  theme_sub_legend()
   theme(legend.position = "top")
 
 print(p)
