@@ -1,0 +1,149 @@
+library(GEOquery)
+library(limma)
+
+gse <- getGEO("GSE73622", GSEMatrix = TRUE, AnnotGPL = TRUE)
+gse_data <- gse[[1]]
+exprs_data <- exprs(gse_data)
+pheno_data <- pData(gse_data)
+feature_data <- fData(gse_data)
+
+write.csv(exprs_data, "~/HYRS_bioinfo/GSE73622/GSE73622_expression_matrix.csv")
+write.csv(pheno_data, "~/HYRS_bioinfo/GSE73622/GSE73622_sample_metadata.csv")
+write.csv(feature_data, "~/HYRS_bioinfo/GSE73622/GSE73622_probe_annotation.csv")
+
+
+
+# Remove probes with too many NAs or zero variance
+exprs_data <- exprs_data[complete.cases(exprs_data), ]
+exprs_data <- exprs_data[apply(exprs_data, 1, var) > 0.01, ]# change threshold as needed
+# Filter out low expression probes (e.g., below 25th percentile)
+#finding column NaN
+exprs_data <- log2(exprs_data + 1)
+sum(is.nan(exprs_data))
+rownames(exprs_data)
+colSums(is.na(exprs_data))
+dim(exprs_data)
+head(exprs_data)
+# fill column NaN with median 
+exprs_data[is.nan(exprs_data)] <- NA
+
+exprs_data <- apply(exprs_data, 2, function(x) {
+  x[is.na(x)] <- median(x, na.rm = TRUE)
+  x
+})
+
+threshold <- quantile(rowMeans(exprs_data), 0.25)
+exprs_data <- exprs_data[rowMeans(exprs_data) > threshold, ]
+
+
+
+# Ensure annotation includes gene symbols
+feature_data <- fData(gse_data)
+colnames(feature_data)
+head(feature_data$`Gene symbol`)  # Confirm it has gene symbols
+
+# Combine expression data and annotation
+exprs_annotated <- data.frame(probe_id = rownames(exprs_data),
+                              exprs_data,
+                              stringsAsFactors = FALSE)
+
+# Add gene symbols
+exprs_annotated$gene_symbol <- feature_data[rownames(exprs_data), "Gene symbol"]
+exprs_annotated$gene_symbol <- sapply(strsplit(exprs_annotated$gene_symbol, "///", fixed = TRUE), `[`, 1)
+
+write.csv(exprs_annotated, "~/HYRS_bioinfo/GSE73622/GSE73622_Exprs_annotated.csv")
+colnames(exprs_annotated)
+
+dim(exprs_annotated)
+#female_samples <- pheno_data$`gender:ch1` == "F"
+#exprs_female <- exprs_annotated[, female_samples]
+#pheno_female <- pheno_data[female_samples, ]
+#cell_samples <- pheno_data$`cell type:ch1 ` == "Endometrial Mesenchymal Stem Cell, Endometrial Stromal Fibroblast"
+#exprs_female <- exprs_annotated [, cell_samples]
+#pheno_females <- pheno_data [female_samples, ]
+#exprs_females_matrix <- exprs_cells[, !(colnames(exprs_cells) %in% c("probe_id", "gene_symbol"))]
+#group_females <- factor(pheno_data$`disease:ch1`)#check if diesease is right
+#design_female <- model.matrix(~ 0 + group_cells)
+#colnames(design_female) <- make.names(colnames(design_female))
+#contrast.matrix <- makeContrasts(Endometriosis_vs_Control = Endometriosis - Control, levels = design_female)
+
+exprs_matrix <- exprs_annotated
+dim(exprs_matrix)
+
+table(pheno_data$`disease:ch1`)
+group <- factor(pheno_data$`disease:ch1`)
+colnames(exprs_matrix)
+rownames(pheno_data)
+pheno_data <- pheno_data[colnames(exprs_matrix), ]
+
+design <- model.matrix(~0 + group)
+colnames(design) <- make.names(colnames(design))
+contrast.matrix <- makeContrasts(
+  Endometriosis_vs_Control = groupEndometriosis - groupNo.Endometriosis,
+  levels = design
+)
+
+fit <- lmFit(exprs_data, design)
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+results <- topTable(fit2, adjust = "fdr", number = Inf)
+
+results$probe_id <- rownames(results)
+results_annotated <- merge(results, exprs_annotated[, c("probe_id", "gene_symbol")], by = "probe_id", all.x = TRUE)
+
+
+#significant_DEGs <- results_annotated[results_annotated$adj.P.Val < 0.05 & abs(results_annotated$logFC) > 0.1, ]
+write.csv(results_annotated, "~/HYRS_bioinfo/GSE73622/OVERALL.622.csv", row.names = FALSE)
+
+
+#s <- read.csv()
+
+# Define thresholds
+logFC_threshold <- 0.05
+adjP_threshold <- 0.05
+
+# Classify genes
+results_annotated$Regulation <- ifelse(
+  results_annotated$adj.P.Val < adjP_threshold & results_annotated$logFC > logFC_threshold, 
+  "Upregulated",
+  ifelse(
+    results_annotated$adj.P.Val < adjP_threshold & results_annotated$logFC < -logFC_threshold, 
+    "Downregulated",
+    "Not Significant"
+  )
+)
+# View result
+table(results_annotated$Regulation)
+
+# Save classified results
+write.csv(results_annotated, "~/HYRS_bioinfo/GSE73622/OVERALL.622.csv", row.names = FALSE)
+
+
+
+library(EnhancedVolcano)
+
+b <- volcano_plot <- EnhancedVolcano(
+  results_annotated,
+  lab = results_annotated$gene_symbol,
+  x = 'logFC',
+  y = 'P.Value',
+  pCutoff = 0.05,
+  FCcutoff = 0.1,
+  col = c('grey30',  # Not Significant
+          'blue',    # Downregulated
+          'red'),    # Upregulated
+  pointSize = 2.5,
+  labSize = 3.5,
+  title = 'Volcano Plot: Endometriosis vs control',
+  subtitle = 'Upregulated (red), Downregulated (blue), Not Significant (grey)'
+)
+print(b)
+# Save the plot
+ggsave(
+  filename = "~/HYRS_bioinfo/GSE73622/volcano_plot_622.png",
+  plot = volcano_plot,
+  width = 10,
+  height = 8,
+  dpi = 300
+)
