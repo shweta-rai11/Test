@@ -1,0 +1,55 @@
+###### plot  --- here is the code 
+
+library(EnhancedVolcano)
+library(ggplot2)
+
+# --- Fix: annotate by probe_id (results has no gene_symbol yet) ---
+results$probe_id <- rownames(results)
+results_annotated <- merge(
+  results,
+  exprs_annotated[, c("probe_id", "gene_symbol")],
+  by = "probe_id", all.x = TRUE
+)
+
+# --- Thresholds (keep coloring and the dashed cutoff lines consistent) ---
+logFC_threshold <- 0.1
+adjP_threshold  <- 0.05
+
+# --- Classify direction ---
+results_annotated$Regulation <- ifelse(
+  results_annotated$P.Value < adjP_threshold & results_annotated$logFC >  logFC_threshold, "Upregulated",
+  ifelse(results_annotated$P.Value < adjP_threshold & results_annotated$logFC < -logFC_threshold, "Downregulated",
+         "Not Significant"))
+print(table(results_annotated$Regulation))
+
+# --- Custom colour key: up = red, down = blue, rest = grey ---
+keyvals <- ifelse(
+  results_annotated$Regulation == "Upregulated",   "red2",
+  ifelse(results_annotated$Regulation == "Downregulated", "royalblue", "grey30"))
+keyvals[is.na(keyvals)] <- "grey30"
+names(keyvals)[keyvals == "red2"]      <- "Upregulated"
+names(keyvals)[keyvals == "royalblue"] <- "Downregulated"
+names(keyvals)[keyvals == "grey30"]    <- "Not significant"
+
+volcano_plot <- EnhancedVolcano(
+  results_annotated,
+  lab       = results_annotated$gene_symbol,
+  x         = "logFC",
+  y         = "P.Value",
+  pCutoff   = adjP_threshold,
+  FCcutoff  = logFC_threshold,
+  colCustom = keyvals,          # <- direction-aware colouring
+  colAlpha  = 0.8,
+  pointSize = 2.5,
+  labSize   = 3.5,
+  drawConnectors = TRUE,
+  title    = "Volcano Plot: Endometriosis vs Control",
+  subtitle = "Upregulated (red), Downregulated (blue), Not significant (grey)",
+  ylab     = bquote(~-Log[10]~ "adj." ~italic(P))
+)
+print(volcano_plot)
+
+ggsave("~/HYRS_bioinfo/GSE73622/volcano_plot_622.png",
+       plot = volcano_plot, width = 10, height = 8, dpi = 300)
+
+
