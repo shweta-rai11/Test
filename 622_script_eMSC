@@ -154,3 +154,37 @@ print(volcano_plot)
 ggsave("~/HYRS_bioinfo/GSE73622/volcano_plot_622.png",
        plot = volcano_plot, width = 10, height = 8, dpi = 300)
 #step 26: make heatmap using pheatmap
+
+
+
+################# pushed the code at 20 july 1:54 pm
+
+combined <- interaction(group, group2)
+design <- model.matrix(~0 + combined)
+colnames(design) <- make.names(colnames(design))  # clean names for contrasts
+colnames(design)
+
+
+library(limma)
+
+cont.matrix <- makeContrasts(
+  # Disease effect in celltype1 (eMSC)
+  Endo_vs_Control_eMSC = combinedEndometriosis.eMSC      - combinedNo.Endometriosis.eMSC,
+  
+  # Disease effect in celltype2 (eSF)
+  Endo_vs_Control_eSF  = combinedEndometriosis.eSF       - combinedNo.Endometriosis.eSF,
+  
+  # Cell-type effect in Control
+  eSF_vs_eMSC_Control  = combinedNo.Endometriosis.eSF    - combinedNo.Endometriosis.eMSC,
+  
+  # Cell-type effect in Endometriosis
+  eSF_vs_eMSC_Endo     = combinedEndometriosis.eSF       - combinedEndometriosis.eMSC,
+  
+  levels = design
+)
+
+fit <- lmFit(exprs_numeric, design)
+fit2 <- contrasts.fit(fit, cont.matrix)
+fit2 <- eBayes(fit2)
+
+
