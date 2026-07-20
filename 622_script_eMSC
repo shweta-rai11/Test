@@ -46,8 +46,12 @@ exprs_annotated$gene_symbol <- feature_data[rownames(exprs_data), "Gene symbol"]
 exprs_annotated$gene_symbol <- sapply(strsplit(exprs_annotated$gene_symbol, "///", fixed = TRUE), `[`, 1)
 #step 10: save express annotated
 write.csv(exprs_annotated, "~/HYRS_bioinfo/GSE73622/GSE73622_Exprs_annotated.csv")
- #step 10: tuen exprs annotated into matrix so it can be used by fit
+#step 10: tuen exprs annotated into matrix so it can be used by fit
 exprs_matrix <- exprs_annotated
+
+#step take out nan in exprs and pheno data
+keep <- !is.na(pheno_data)
+pheno_data <- pheno_data[keep, ]
 
 #step 11: see what diseases columns are
 table(pheno_data$`disease:ch1`)
@@ -59,31 +63,46 @@ pheno_data$`cell type:ch1` <- ifelse(
   "eMSC",
   "eSF"
 )
+pheno_data$`disease:ch1` <- ifelse(
+  pheno_data$`disease:ch1` == "Endometriosis",
+  "endo",
+  "no_endo"
+)
+#step 13: make dat awith just cell type and respective disease state
 
-#step 13: take out diseases and cell type and make data with just them. ex.group
-group <- factor(pheno_data$`disease:ch1`)
-group2 <- factor(pheno_data$`cell type:ch1`)
+
+sum(is.na(pheno_data$`disease:ch1`))
+sum(is.na(pheno_data$`cell type:ch1`))
+
+group <- factor(
+  paste(pheno_data$`disease:ch1`,
+        pheno_data$`cell type:ch1`,
+        sep = "_")
+)
+group <- group[keep]
+group <- factor(group)
+table(group)
+
 #step 14: make group in design 
-design <- model.matrix(~0 + group + group2)
+design <- model.matrix(~0 + group)
+dim(design)# if not 4 run 53, 54, then 82-84 again
 
 colnames(design) <- make.names(colnames(design))
 ##step 15: make contrast matrix between disease, get from design
-cont.matrix <- makeContrasts( Endo_vs_NoEndo = groupEndometriosis - groupNo.Endometriosis,
-  eSF_vs_NoEndo  = group2eSF - groupNo.Endometriosis, 
-  eMSC_vs_NoEndo  = group2eMSC -groupNo.Endometriosis, 
-  eSF_vs_eMSC  = group2eSF - group2eMSC,
-  levels = design)
+cont.matrix <- makeContrasts( endo_eMSC_vs_no_endo_eMSC = groupendo_eMSC - groupno_endo_eMSC,
+                              levels = design)
 
 
 # step 16: using limma package make linear model of exprs data and design
 fit <- lmFit(exprs_data, design)
 #step 17: do actual comparrision between control and disease
-fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- contrasts.fit(fit, cont.matrix)
 #Step 18: get rid of noise
 fit2 <- eBayes(fit2)
 #step 19: veiw results and make new data with results
 results <- topTable(fit2, adjust = "fdr", number = Inf)
 dim(results)
+colnames(results)
 
 #Step 20: include gene symbol and probe id into results data, make new data with both, ex results annotated
 results$probe_id <- rownames(results)
@@ -113,6 +132,7 @@ names(keyvals)[keyvals == "red2"]      <- "Upregulated"
 names(keyvals)[keyvals == "royalblue"] <- "Downregulated"
 names(keyvals)[keyvals == "grey30"]    <- "Not significant"
 #step 24: make volcano plot
+library(EnhancedVolcano)
 volcano_plot <- EnhancedVolcano(
   results_annotated,
   lab       = results_annotated$gene_symbol,
