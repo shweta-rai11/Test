@@ -1,0 +1,325 @@
+# =============================================================================
+#  RNA-seq FROM NCBI GEO — LINE-BY-LINE WALKTHROUGH
+#  For: HYRS summer student
+#
+#  HOW TO USE THIS FILE
+#    Open it in RStudio. Put your cursor on LINE 1 and press Ctrl+Enter.
+#    That runs one line and moves down. Keep pressing Ctrl+Enter.
+#
+#    Do NOT run the whole file at once. Run one line, LOOK at what appears
+#    in the console, then run the next. That is the whole point.
+#
+#    Lines marked  ### EDIT ###  need you to change something first.
+#    Lines marked  ### LOOK ###  print something you must actually read.
+# =============================================================================
+
+
+# =============================================================================
+#  STEP 1 — INSTALL PACKAGES
+#  Run these SIX lines once, ever. Then never again. Takes 15-30 min.
+#  Skip to STEP 2 if you already did this on this computer.
+# =============================================================================
+
+install.packages("BiocManager")
+
+BiocManager::install("GEOquery")
+
+BiocManager::install("DESeq2")
+
+BiocManager::install("pheatmap")
+
+BiocManager::install("EnhancedVolcano")
+
+BiocManager::install("clusterProfiler")
+
+BiocManager::install("org.Hs.eg.db")          ### EDIT ### mouse? use "org.Mm.eg.db"
+
+
+# =============================================================================
+#  STEP 2 — LOAD THE PACKAGES
+#  Do this EVERY time you open RStudio. Installing ≠ loading.
+# =============================================================================
+
+library(GEOquery)
+
+library(DESeq2)
+
+library(pheatmap)
+
+library(EnhancedVolcano)
+
+library(clusterProfiler)
+
+library(org.Hs.eg.db)                          ### EDIT ### match the line above
+
+
+# =============================================================================
+#  STEP 3 — DOWNLOAD YOUR DATASET FROM GEO
+# =============================================================================
+
+my_gse <- "GSE123456"                          ### EDIT ### your accession
+
+my_gse                                         ### LOOK ### did it store correctly?
+
+getGEOSuppFiles(my_gse)                        # downloads. may take a few minutes.
+
+list.files(my_gse)                             ### LOOK ### what did we get?
+
+# Read the filenames that just printed. You want the one with "count" or "raw"
+# in the name. Type that exact filename into the next line.
+
+my_file <- file.path(my_gse, "PUT_FILENAME_HERE.txt.gz")   ### EDIT ###
+
+file.exists(my_file)                           ### LOOK ### must print TRUE
+
+
+# =============================================================================
+#  STEP 4 — READ THE COUNT TABLE INTO R
+# =============================================================================
+
+counts <- read.delim(gzfile(my_file), row.names = 1, check.names = FALSE)
+
+dim(counts)                                    ### LOOK ### genes, then samples
+
+counts[1:5, 1:5]                               ### LOOK ### top-left corner
+
+# ---------------------------------------------------------------------------
+#  STOP. Look at those numbers.
+#  Whole numbers (0, 14, 2071)     -> GOOD, keep going.
+#  Decimals (3.47, 0.02)           -> BAD. Those are TPM/FPKM, not counts.
+#                                     DESeq2 cannot use them. Ask your
+#                                     supervisor before continuing.
+# ---------------------------------------------------------------------------
+
+colnames(counts)                               ### LOOK ### your sample names
+
+# If you see non-sample columns (gene_name, length, chromosome...), remove them.
+# Only run the next line IF you saw junk columns above.
+
+counts <- counts[, sapply(counts, is.numeric)]
+
+counts <- as.matrix(counts)
+
+counts <- round(counts)                        # force whole numbers
+
+ncol(counts)                                   ### LOOK ### how many samples?
+
+
+# =============================================================================
+#  STEP 5 — SAY WHICH SAMPLE IS WHICH
+#  R cannot guess this. Go to the GEO webpage for your GSE and read the
+#  sample descriptions to find out which is control and which is treated.
+# =============================================================================
+
+colnames(counts)                               ### LOOK ### copy this order!
+
+# Now type one label per sample, IN THE EXACT ORDER printed above.
+# Use only the words "control" and "treated". Spelling and case matter.
+
+my_groups <- c("control", "control", "control", "treated", "treated", "treated")   ### EDIT ###
+
+length(my_groups)                              ### LOOK ### must equal ncol(counts)
+
+ncol(counts)                                   ### LOOK ### these two must match
+
+my_groups <- factor(my_groups, levels = c("control", "treated"))
+
+table(my_groups)                               ### LOOK ### need >=2 per group, 3+ is better
+
+sample_info <- data.frame(condition = my_groups)
+
+rownames(sample_info) <- colnames(counts)
+
+sample_info                                    ### LOOK ### check every row is right
+
+
+# =============================================================================
+#  STEP 6 — BUILD THE DESeq2 OBJECT
+# =============================================================================
+
+dds <- DESeqDataSetFromMatrix(countData = counts,
+                              colData   = sample_info,
+                              design    = ~ condition)
+
+dds                                            ### LOOK ### a summary prints
+
+nrow(dds)                                      ### LOOK ### genes before filtering
+
+# Throw away genes that are basically switched off. They only add noise.
+
+keep <- rowSums(counts(dds) >= 10) >= 2
+
+dds <- dds[keep, ]
+
+nrow(dds)                                      ### LOOK ### genes after filtering
+
+
+# =============================================================================
+#  STEP 7 — QUALITY CHECK BEFORE YOU TRUST ANYTHING
+#  This is the most important plot in the whole analysis.
+# =============================================================================
+
+vsd <- vst(dds, blind = TRUE)
+
+plotPCA(vsd, intgroup = "condition")           ### LOOK ### at the Plots panel
+
+# ---------------------------------------------------------------------------
+#  Do the two colours form two separate clusters?
+#    YES -> great, your groups really are different. Continue.
+#    NO  -> the treatment may have had little effect, OR the samples are
+#           mislabelled, OR something else (batch) is driving the data.
+#           Screenshot this and show your supervisor BEFORE continuing.
+#  Either way, save this plot — it belongs in your poster.
+# ---------------------------------------------------------------------------
+
+
+# =============================================================================
+#  STEP 8 — RUN THE ACTUAL TEST
+# =============================================================================
+
+dds <- DESeq(dds)                              # the statistics happen here
+
+res <- results(dds, contrast = c("condition", "treated", "control"))
+
+summary(res)                                   ### LOOK ### how many genes up/down?
+
+res <- res[order(res$padj), ]                  # sort best-first
+
+head(res, 20)                                  ### LOOK ### your top 20 genes
+
+# ---------------------------------------------------------------------------
+#  READING THAT TABLE
+#    log2FoldChange  size of change.  +1 = doubled.  -1 = halved.  0 = no change.
+#    pvalue          raw significance. IGNORE THIS ONE.
+#    padj            corrected significance. THIS is the one that counts.
+#                    We tested ~20,000 genes, so some look significant by pure
+#                    luck. padj fixes that. Always use padj.
+#    NA in padj      gene was filtered out. Not an error.
+# ---------------------------------------------------------------------------
+
+
+# =============================================================================
+#  STEP 9 — PULL OUT THE SIGNIFICANT GENES
+# =============================================================================
+
+sig <- subset(res, !is.na(padj) & padj < 0.05 & abs(log2FoldChange) > 1)
+
+nrow(sig)                                      ### LOOK ### your headline number
+
+head(sig, 20)                                  ### LOOK ### the strongest hits
+
+dir.create("results")
+
+write.csv(as.data.frame(res), "results/all_genes.csv")
+
+write.csv(as.data.frame(sig), "results/significant_genes.csv")
+
+list.files("results")                          ### LOOK ### confirm files exist
+
+
+# =============================================================================
+#  STEP 10 — VOLCANO PLOT
+#  Every dot is one gene. Left = down in treated. Right = up in treated.
+#  Higher up = more statistically confident.
+# =============================================================================
+
+EnhancedVolcano(res,
+                lab      = rownames(res),
+                x        = "log2FoldChange",
+                y        = "padj",
+                pCutoff  = 0.05,
+                FCcutoff = 1,
+                title    = "treated vs control")     ### LOOK ### Plots panel
+
+
+# =============================================================================
+#  STEP 11 — HEATMAP OF TOP GENES
+#  Rows = genes, columns = samples. Red = high, blue = low.
+#  Samples from the same group should look similar to each other.
+# =============================================================================
+
+top_genes <- head(rownames(sig), 30)
+
+top_genes                                      ### LOOK ### the 30 gene names
+
+mat <- assay(vsd)[top_genes, ]
+
+mat <- mat - rowMeans(mat)                     # center so colours mean something
+
+pheatmap(mat, annotation_col = sample_info)    ### LOOK ### Plots panel
+
+
+# =============================================================================
+#  STEP 12 — WHAT DO THESE GENES ACTUALLY DO?
+#  Enrichment asks: are certain biological processes over-represented in my
+#  gene list, more than you'd expect from a random list of the same size?
+# =============================================================================
+
+gene_list <- rownames(sig)
+
+head(gene_list)                                ### LOOK ### what do IDs look like?
+
+gene_list <- gsub("\\..*$", "", gene_list)     # strips ".12" off ENSG00000141510.12
+
+head(gene_list)                                ### LOOK ### suffix gone?
+
+# Pick ONE of the next two lines depending on what you just saw.
+# IDs starting with ENSG (or ENSMUSG) -> run the ENSEMBL line.
+# IDs that are gene names like TP53    -> run the SYMBOL line.
+
+my_id_type <- "ENSEMBL"                        ### EDIT ### pick one
+
+my_id_type <- "SYMBOL"                         ### EDIT ### ...or this one
+
+ego <- enrichGO(gene    = gene_list,
+                OrgDb   = org.Hs.eg.db,        ### EDIT ### match your organism
+                keyType = my_id_type,
+                ont     = "BP")
+
+head(as.data.frame(ego), 15)                   ### LOOK ### your pathways
+
+dotplot(ego, showCategory = 20)                ### LOOK ### Plots panel
+
+write.csv(as.data.frame(ego), "results/pathways.csv")
+
+# If this came back empty: that is a real result, not a bug. It happens when
+# the gene list is short or the changes are scattered. Say so in your write-up.
+
+
+# =============================================================================
+#  STEP 13 — RECORD WHAT YOU DID
+#  Reproducibility. Run this and paste the output into your lab notebook.
+# =============================================================================
+
+sessionInfo()                                  ### LOOK ### exact versions used
+
+Sys.Date()
+
+# ---------------------------------------------------------------------------
+#  ALSO WRITE IN YOUR NOTEBOOK:
+#    - the GSE accession
+#    - how many samples in each group
+#    - how many genes were significant
+#    - anything that looked weird in the PCA plot
+# ---------------------------------------------------------------------------
+
+
+# =============================================================================
+#  IF SOMETHING BROKE
+#
+#  "could not find function X"
+#      -> you skipped a library() line in STEP 2. Run them all.
+#
+#  "object 'counts' not found"
+#      -> you skipped a line above. Go back up and run them in order.
+#
+#  "ncol(countData) != nrow(colData)"
+#      -> my_groups has the wrong number of labels. Recount in STEP 5.
+#
+#  "all samples have 0 counts" / everything filtered out
+#      -> you probably loaded the wrong file. Go back to STEP 3.
+#
+#  0 significant genes
+#      -> may be genuine. Check the PCA from STEP 7 first — if the groups
+#         never separated, this is the expected outcome.
+# =============================================================================
