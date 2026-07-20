@@ -1,0 +1,17 @@
+library(limma)
+
+cont.matrix <- makeContrasts(
+  # Disease effect in celltype1 (eMSC)
+  Endo_vs_Control_eMSC = combinedEndometriosis.eMSC      - combinedNo.Endometriosis.eMSC,
+  
+  # Disease effect in celltype2 (eSF)
+  Endo_vs_Control_eSF  = combinedEndometriosis.eSF       - combinedNo.Endometriosis.eSF,
+  
+  # Cell-type effect in Control
+  eSF_vs_eMSC_Control  = combinedNo.Endometriosis.eSF    - combinedNo.Endometriosis.eMSC,
+  
+  # Cell-type effect in Endometriosis
+  eSF_vs_eMSC_Endo     = combinedEndometriosis.eSF       - combinedEndometriosis.eMSC,
+  
+  levels = design
+)
