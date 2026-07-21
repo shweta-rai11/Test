@@ -1,0 +1,126 @@
+#Step 1: download and use packages
+library(GEOquery)
+library(limma)
+#step 2: download and use data with GEOquery package
+gse <- getGEO("GSE73622", GSEMatrix = TRUE, AnnotGPL = TRUE)
+gse_data <- gse[[1]]
+exprs_data <- exprs(gse_data)
+pheno_data <- pData(gse_data)
+feature_data <- fData(gse_data)
+#step 3: save data
+write.csv(exprs_data, "~/HYRS_bioinfo/GSE73622/GSE73622_expression_matrix.csv")
+write.csv(pheno_data, "~/HYRS_bioinfo/GSE73622/GSE73622_sample_metadata.csv")
+write.csv(feature_data, "~/HYRS_bioinfo/GSE73622/GSE73622_probe_annotation.csv")
+
+# step 4:Remove probes with too many NAs or zero variance
+exprs_data <- exprs_data[complete.cases(exprs_data), ]
+exprs_data <- exprs_data[apply(exprs_data, 1, var) > 0.01, ]# change threshold as needed
+
+#step 5:finding column NaN
+#exprs_data <- log2(exprs_data + 1)#dont normalize cause data already is
+sum(is.nan(exprs_data))
+rownames(exprs_data)
+colSums(is.na(exprs_data))
+dim(exprs_data)
+head(exprs_data)
+# step 6: fill column NaN with median 
+exprs_data[is.nan(exprs_data)] <- NA
+
+exprs_data <- apply(exprs_data, 2, function(x) {
+  x[is.na(x)] <- median(x, na.rm = TRUE)
+  x
+})
+
+# step 7: see if feature data contains gene symbol
+feature_data <- fData(gse_data)
+colnames(feature_data)
+head(feature_data$`Gene symbol`)
+
+# step 8:Combine expression data and annotation, adding probe id
+exprs_annotated <- data.frame(probe_id = rownames(exprs_data),
+                              exprs_data,
+                              stringsAsFactors = FALSE)
+
+# step 9: Add gene symbols to exprs_annotated
+exprs_annotated$gene_symbol <- feature_data[rownames(exprs_data), "Gene symbol"]
+exprs_annotated$gene_symbol <- sapply(strsplit(exprs_annotated$gene_symbol, "///", fixed = TRUE), `[`, 1)
+#step 10: save express annotated
+write.csv(exprs_annotated, "~/HYRS_bioinfo/GSE73622/GSE73622_Exprs_annotated.csv")
+#step 10: tuen exprs annotated into matrix so it can be used by fit
+exprs_matrix <- exprs_annotated
+
+#step 11: see what diseases columns are
+table(pheno_data$`disease:ch1`)
+table(pheno_data$`cell type:ch1`)
+#step 12: add colnames of exprs matrix to pheno data and shorten long names
+pheno_data <- pheno_data[colnames(exprs_matrix), ]
+pheno_data$`cell type:ch1` <- ifelse(
+  pheno_data$`cell type:ch1` == "Endometrial Mesenchymal Stem Cell",
+  "eMSC",
+  "eSF"
+)
+
+#design <- model.matrix(~0 + group2)
+
+colnames(design)
+#step 13: take out diseases and cell type and make data with just them. ex.group
+group <- factor(pheno_data$`disease:ch1`)
+group2 <- factor(pheno_data$`cell type:ch1`)
+
+
+# Make design matrix with no intercept
+
+
+combined <- interaction(group)
+design <- model.matrix(~0 + combined)
+colnames(design) <- make.names(colnames(design))  # clean names for contrasts
+colnames(design)
+
+
+
+# Keep only numeric columns
+numeric_cols <- sapply(exprs_matrix, is.numeric)
+exprs_numeric <- as.matrix(exprs_matrix[ , numeric_cols])
+
+cont.matrix <- makeContrasts( endo_vs_noEndo = combinedEndometriosis - combinedNo.Endometriosis,
+                              levels = design)
+
+
+
+
+
+
+### LOOK ### clean names now
+
+fit <- lmFit(exprs_data, design)
+#step 17: do actual comparrision between control and disease
+fit2 <- contrasts.fit(fit, cont.matrix)
+#Step 18: get rid of noise
+fit2 <- eBayes(fit2)
+#step 19: veiw results and make new data with results
+results <- topTable(fit2, coef = "endo_vs_noEndo",
+                    adjust.method = "fdr", number = Inf)
+colnames(results)   
+
+
+
+
+#Step 20: include gene symbol and probe id into results data, make new data with both, ex results annotated
+results$probe_id <- rownames(results)
+results_annotated <- merge(
+  results,
+  exprs_annotated[, c("probe_id", "gene_symbol")],
+  by = "probe_id", all.x = TRUE
+)
+#step 21: make thresholds, come in handy for volcano plot
+logFC_threshold <- 0.1
+adjP_threshold  <- 0.05
+
+#step 22: classify what is upregualted and down with logFC cutoffs. handy for volcano
+results_annotated$Regulation <- ifelse(
+  results_annotated$adj.P.Val < adjP_threshold & results_annotated$logFC >  logFC_threshold, "Upregulated",
+  ifelse(results_annotated$adj.P.Val < adjP_threshold & results_annotated$logFC < -logFC_threshold, "Downregulated",
+         "Not Significant"))
+print(table(results_annotated$Regulation))
+colnames(results_annotated)
+
