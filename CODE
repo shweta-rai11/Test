@@ -1,0 +1,13 @@
+# Define your cutoffs
+padj_cutoff <- 0.05
+lfc_cutoff  <- 1.0  # e.g., 2-fold change
+
+# Filter upregulated genes
+up_regulated <- subset(res_df, padj < padj_cutoff & log2FoldChange > lfc_cutoff)
+
+# Filter downregulated genes
+down_regulated <- subset(res_df, padj < padj_cutoff & log2FoldChange < -lfc_cutoff)
+
+# View counts
+nrow(up_regulated)
+nrow(down_regulated)
